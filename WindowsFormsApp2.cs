@@ -12,6 +12,8 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using MySql.Data.MySqlClient;
+using System.Runtime.InteropServices;
+using System.Collections;
 
 
 namespace WindowsFormsApp2
@@ -30,8 +32,8 @@ namespace WindowsFormsApp2
         {
             try
             {
-                dtpStart.Value = DateTime.Now.Date; // Mặc định từ đầu ngày hiện tại
-                dtpEnd.Value = DateTime.Now;        // Đến thời điểm hiện tại
+                dtpStart.Value = DateTime.Now.Date;
+                dtpEnd.Value = DateTime.Now;       
                 InitWatcher();
                 LoadData();
             }
@@ -71,6 +73,32 @@ namespace WindowsFormsApp2
                 MessageBox.Show("Lỗi khi khởi tạo FileSystemWatcher: " + ex.Message, "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
+        [DllImport("ntdll.dll")]
+        public static extern int NtQuerySystemInformation(int SystemInformationClass, IntPtr SystemInformation, int SystemInformationLength, out int ReturnLength);
+
+        [DllImport("kernel32.dll")]
+        public static extern IntPtr OpenProcess(uint processAccess, bool bInheritHandle, int processId);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool CloseHandle(IntPtr hObject);
+
+        private List<string> GetOpenFilesByProcess(int processId)
+        {
+            List<string> openFiles = new List<string>();
+
+            try
+            {
+                Process process = Process.GetProcessById(processId);
+                if (process != null)
+                {
+                    string processName = process.ProcessName;
+                    openFiles.Add(process.MainModule.FileName);
+                }
+            }
+            catch { } 
+
+            return openFiles;
+        }
 
         private void FileRenamedHandler(string oldPath, string newPath)
         {
@@ -106,7 +134,7 @@ namespace WindowsFormsApp2
                             if (!proc.HasExited && proc.MainModule != null)
                             {
                                 string processName = proc.ProcessName;
-                                string[] openFiles = GetOpenFilesByProcess(processId);
+                                List<string> openFiles = GetOpenFilesByProcess(processId);
                                 if (openFiles.Contains(filePath))
                                 {
                                     return processName;
@@ -114,28 +142,12 @@ namespace WindowsFormsApp2
                             }
                         }
                     }
-                    catch { } // Bỏ qua lỗi quyền truy cập
+                    catch { }
                 }
             }
             return "Không xác định";
         }
 
-        private string[] GetOpenFilesByProcess(int processId)
-        {
-            List<string> files = new List<string>();
-            try
-            {
-                using (Process proc = Process.GetProcessById(processId))
-                {
-                    if (!proc.HasExited && proc.MainModule != null)
-                    {
-                        files.Add(proc.MainModule.FileName);
-                    }
-                }
-            }
-            catch { } // Bỏ qua lỗi truy cập
-            return files.ToArray();
-        }
 
         private void FileEventHandler(string filePath, string action)
         {
@@ -144,7 +156,17 @@ namespace WindowsFormsApp2
                 if (string.IsNullOrEmpty(filePath))
                     return;
 
-                string appName = GetProcessUsingFile(filePath); // Lấy ứng dụng mở tệp
+                string processName = "Không xác định";
+
+                foreach (Process process in Process.GetProcesses())
+                {
+                    List<string> openFiles = GetOpenFilesByProcess(process.Id);
+                    if (openFiles.Contains(filePath))
+                    {
+                        processName = process.ProcessName;
+                        break;
+                    }
+                }
 
                 string query = "INSERT INTO file_changes (file_path, action, timestamp, APP_NAME) VALUES (@file_path, @action, NOW(), @app_name)";
 
@@ -155,12 +177,12 @@ namespace WindowsFormsApp2
                     {
                         cmd.Parameters.AddWithValue("@file_path", filePath);
                         cmd.Parameters.AddWithValue("@action", action);
-                        cmd.Parameters.AddWithValue("@app_name", appName);
+                        cmd.Parameters.AddWithValue("@app_name", processName);
                         cmd.ExecuteNonQuery();
                     }
                 }
 
-                Invoke(new Action(() => listBox1.Items.Insert(0, $"{DateTime.Now}: {action} - {filePath} - {appName}")));
+                Invoke(new Action(() => listBox1.Items.Insert(0, $"{DateTime.Now}: {action} - {filePath} - {processName}")));
                 Invoke(new Action(LoadData));
             }
             catch (Exception ex)
@@ -168,6 +190,7 @@ namespace WindowsFormsApp2
                 MessageBox.Show("Lỗi khi ghi vào DB: " + ex.Message, "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
+
 
 
         private void LoadData()
@@ -224,8 +247,6 @@ namespace WindowsFormsApp2
                     {
                         string startTime = dtpStart.Value.ToString("yyyy-MM-dd HH:mm:ss");
                         string endTime = dtpEnd.Value.ToString("yyyy-MM-dd HH:mm:ss");
-
-                        // Hiển thị giá trị thời gian để kiểm tra
                         MessageBox.Show($"Lọc từ: {startTime} đến {endTime}", "Debug", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
                         cmd.Parameters.AddWithValue("@start", startTime);
@@ -238,7 +259,6 @@ namespace WindowsFormsApp2
                     }
                 }
 
-                // Hiển thị dữ liệu lên DataGridView
                 dataGridView1.DataSource = dt;
             }
             catch (Exception ex)
