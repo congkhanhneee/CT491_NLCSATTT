@@ -48,7 +48,7 @@ namespace WindowsFormsApp2
         {
             try
             {
-                string folderPath = @"D:\TAILIEU\CT182_UML";
+                string folderPath = @"D:\TAILIEU\CT182_UML"; //Thư mục ghi nhận
                 if (!Directory.Exists(folderPath))
                 {
                     MessageBox.Show("Thư mục không tồn tại!", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -66,7 +66,7 @@ namespace WindowsFormsApp2
                 watcher.Deleted += (s, e) => FileEventHandler(e.FullPath, "Xóa");
                 watcher.Renamed += (s, e) => FileRenamedHandler(e.OldFullPath, e.FullPath);
 
-                listBox1.Items.Add("🔍 Đang theo dõi: " + folderPath);
+                listBox1.Items.Add("Đang theo dõi: " + folderPath);
             }
             catch (Exception ex)
             {
