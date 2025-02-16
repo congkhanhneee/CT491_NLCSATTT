@@ -1,20 +1,13 @@
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Data.SqlClient;
 using System.Diagnostics;
-using System.Drawing;
+using System.Runtime.InteropServices;
+using System.Text;
+using MySql.Data.MySqlClient;
 using System.IO;
 using System.Linq;
-using System.Management;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
-using MySql.Data.MySqlClient;
-using System.Runtime.InteropServices;
-using System.Collections;
-
+using System.Data;
 
 namespace WindowsFormsApp2
 {
@@ -22,6 +15,25 @@ namespace WindowsFormsApp2
     {
         private FileSystemWatcher watcher;
         private string connectionString = "server=localhost;database=file_tracking;user=root;password=;";
+
+        // Import từ kernel32.dll và psapi.dll
+        [DllImport("kernel32.dll")]
+        public static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
+
+        [DllImport("psapi.dll")]
+        public static extern bool EnumProcesses([Out] int[] processIds, int arraySizeBytes, out int bytesCopied);
+
+        [DllImport("psapi.dll")]
+        public static extern bool EnumProcessModules(IntPtr hProcess, [Out] IntPtr[] moduleHandles, int arraySizeBytes, out int bytesCopied);
+
+        [DllImport("psapi.dll", CharSet = CharSet.Auto)]
+        public static extern int GetModuleFileNameEx(IntPtr hProcess, IntPtr hModule, [Out] StringBuilder lpFilename, int nSize);
+
+        [DllImport("kernel32.dll")]
+        public static extern bool CloseHandle(IntPtr hObject);
+
+        private const uint PROCESS_QUERY_INFORMATION = 0x0400;
+        private const uint PROCESS_VM_READ = 0x0010;
 
         public Form1()
         {
@@ -43,111 +55,33 @@ namespace WindowsFormsApp2
             }
         }
 
-
         private void InitWatcher()
         {
-            try
+            string folderPath = @"D:\TAILIEU\Test"; // Thư mục giám sát
+            if (!Directory.Exists(folderPath))
             {
-                string folderPath = @"D:\TAILIEU\Test"; //Thư mục ghi nhận
-                if (!Directory.Exists(folderPath))
-                {
-                    MessageBox.Show("Thư mục không tồn tại!", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
-
-                watcher = new FileSystemWatcher(folderPath)
-                {
-                    IncludeSubdirectories = true,
-                    EnableRaisingEvents = true
-                };
-
-                watcher.Created += (s, e) => FileEventHandler(e.FullPath, "Tạo");
-                watcher.Changed += (s, e) => FileEventHandler(e.FullPath, "Sửa");
-                watcher.Deleted += (s, e) => FileEventHandler(e.FullPath, "Xóa");
-                watcher.Renamed += (s, e) => FileRenamedHandler(e.OldFullPath, e.FullPath);
-
-                listBox1.Items.Add("Đang theo dõi: " + folderPath);
+                MessageBox.Show("Thư mục không tồn tại!", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
             }
-            catch (Exception ex)
+
+            watcher = new FileSystemWatcher(folderPath)
             {
-                MessageBox.Show("Lỗi khi khởi tạo FileSystemWatcher: " + ex.Message, "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
-        [DllImport("ntdll.dll")]
-        public static extern int NtQuerySystemInformation(int SystemInformationClass, IntPtr SystemInformation, int SystemInformationLength, out int ReturnLength);
+                IncludeSubdirectories = true,
+                EnableRaisingEvents = true
+            };
 
-        [DllImport("kernel32.dll")]
-        public static extern IntPtr OpenProcess(uint processAccess, bool bInheritHandle, int processId);
+            watcher.Created += (s, e) => FileEventHandler(e.FullPath, "Tạo");
+            watcher.Changed += (s, e) => FileEventHandler(e.FullPath, "Sửa");
+            watcher.Deleted += (s, e) => FileEventHandler(e.FullPath, "Xóa");
+            watcher.Renamed += (s, e) => FileRenamedHandler(e.OldFullPath, e.FullPath);
 
-        [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern bool CloseHandle(IntPtr hObject);
-
-        private List<string> GetOpenFilesByProcess(int processId)
-        {
-            List<string> openFiles = new List<string>();
-
-            try
-            {
-                Process process = Process.GetProcessById(processId);
-                if (process != null)
-                {
-                    string processName = process.ProcessName;
-                    openFiles.Add(process.MainModule.FileName);
-                }
-            }
-            catch { }
-
-            return openFiles;
+            listBox1.Items.Add("Đang theo dõi: " + folderPath);
         }
 
         private void FileRenamedHandler(string oldPath, string newPath)
         {
-            try
-            {
-                if (!string.IsNullOrEmpty(newPath))
-                {
-                    FileEventHandler(newPath, $"Đổi tên từ {Path.GetFileName(oldPath)}");
-                }
-                else
-                {
-                    FileEventHandler(oldPath, "Xóa");
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("Lỗi khi xử lý đổi tên: " + ex.Message, "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            FileEventHandler(newPath, $"Đổi tên từ {Path.GetFileName(oldPath)}");
         }
-
-        private string GetProcessUsingFile(string filePath)
-        {
-            string query = "SELECT ProcessId, Name FROM Win32_Process";
-            using (ManagementObjectSearcher searcher = new ManagementObjectSearcher(query))
-            {
-                foreach (ManagementObject process in searcher.Get())
-                {
-                    try
-                    {
-                        int processId = Convert.ToInt32(process["ProcessId"]);
-                        using (Process proc = Process.GetProcessById(processId))
-                        {
-                            if (!proc.HasExited && proc.MainModule != null)
-                            {
-                                string processName = proc.ProcessName;
-                                List<string> openFiles = GetOpenFilesByProcess(processId);
-                                if (openFiles.Contains(filePath))
-                                {
-                                    return processName;
-                                }
-                            }
-                        }
-                    }
-                    catch { }
-                }
-            }
-            return "Không xác định";
-        }
-
 
         private void FileEventHandler(string filePath, string action)
         {
@@ -156,17 +90,7 @@ namespace WindowsFormsApp2
                 if (string.IsNullOrEmpty(filePath))
                     return;
 
-                string processName = "Không xác định";
-
-                foreach (Process process in Process.GetProcesses())
-                {
-                    List<string> openFiles = GetOpenFilesByProcess(process.Id);
-                    if (openFiles.Contains(filePath))
-                    {
-                        processName = process.ProcessName;
-                        break;
-                    }
-                }
+                string processName = GetProcessUsingFile(filePath);
 
                 string query = "INSERT INTO file_changes (file_path, action, timestamp, process_name) VALUES (@file_path, @action, NOW(), @app_name)";
 
@@ -191,13 +115,57 @@ namespace WindowsFormsApp2
             }
         }
 
+        private string GetProcessUsingFile(string filePath)
+        {
+            int[] processIds = new int[1024];
+            if (!EnumProcesses(processIds, processIds.Length * sizeof(int), out int bytesCopied))
+                return "Không xác định";
 
+            int numProcesses = bytesCopied / sizeof(int);
+            foreach (int pid in processIds.Take(numProcesses))
+            {
+                IntPtr hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
+                if (hProcess == IntPtr.Zero)
+                    continue;
+
+                try
+                {
+                    IntPtr[] moduleHandles = new IntPtr[1024];
+                    if (EnumProcessModules(hProcess, moduleHandles, moduleHandles.Length * IntPtr.Size, out int bytesNeeded))
+                    {
+                        int numModules = bytesNeeded / IntPtr.Size;
+                        for (int i = 0; i < numModules; i++)
+                        {
+                            StringBuilder moduleName = new StringBuilder(1024);
+                            if (GetModuleFileNameEx(hProcess, moduleHandles[i], moduleName, moduleName.Capacity) > 0)
+                            {
+                                if (moduleName.ToString().Equals(filePath, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    Process process = Process.GetProcessById(pid);
+                                    return process.ProcessName;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+
+                }
+                finally
+                {
+                    CloseHandle(hProcess);
+                }
+            }
+
+            return "Không xác định";
+        }
 
         private void LoadData()
         {
             try
             {
-                MessageBox.Show("LoadData() được gọi", "Debug", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("Có thay đổi xảy ra!", "Debug", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 string query = "SELECT id, file_path, action, timestamp, process_name FROM file_changes " +
                                "WHERE timestamp BETWEEN STR_TO_DATE(@start, '%Y-%m-%d %H:%i:%s') " +
                                "AND STR_TO_DATE(@end, '%Y-%m-%d %H:%i:%s') ORDER BY timestamp DESC";
@@ -226,51 +194,6 @@ namespace WindowsFormsApp2
                 MessageBox.Show("Lỗi khi tải dữ liệu: " + ex.Message, "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
-
-
-
-
-        private void btnLoadData_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                string startTime = dtpStart.Value.ToString("yyyy-MM-dd HH:mm:ss");
-                string endTime = dtpEnd.Value.ToString("yyyy-MM-dd HH:mm:ss");
-                MessageBox.Show($"Lọc dữ liệu từ: {startTime} đến {endTime}", "Debug", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                string query = "SELECT id, file_path, action, timestamp FROM file_changes " +
-                               "WHERE timestamp BETWEEN STR_TO_DATE(@start, '%Y-%m-%d %H:%i:%s') " +
-                               "AND STR_TO_DATE(@end, '%Y-%m-%d %H:%i:%s') " +
-                               "ORDER BY timestamp DESC";
-
-                DataTable dt = new DataTable();
-
-                using (MySqlConnection conn = new MySqlConnection(connectionString))
-                {
-                    conn.Open();
-                    using (MySqlCommand cmd = new MySqlCommand(query, conn))
-                    {
-                        //string startTime = dtpStart.Value.ToString("yyyy-MM-dd HH:mm:ss");
-                        //string endTime = dtpEnd.Value.ToString("yyyy-MM-dd HH:mm:ss");
-                        MessageBox.Show($"Lọc từ: {startTime} đến {endTime}", "Debug", MessageBoxButtons.OK, MessageBoxIcon.Information);
-
-                        cmd.Parameters.AddWithValue("@start", startTime);
-                        cmd.Parameters.AddWithValue("@end", endTime);
-
-                        using (MySqlDataAdapter adapter = new MySqlDataAdapter(cmd))
-                        {
-                            adapter.Fill(dt);
-                        }
-                    }
-                }
-
-                dataGridView1.DataSource = dt;
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("Lỗi khi tải dữ liệu theo khoảng thời gian: " + ex.Message, "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
-
 
         private void btnLoadData_Click_1(object sender, EventArgs e)
         {
