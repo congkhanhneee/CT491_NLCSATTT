@@ -33,7 +33,7 @@ namespace WindowsFormsApp2
             try
             {
                 dtpStart.Value = DateTime.Now.Date;
-                dtpEnd.Value = DateTime.Now;       
+                dtpEnd.Value = DateTime.Now;
                 InitWatcher();
                 LoadData();
             }
@@ -48,7 +48,7 @@ namespace WindowsFormsApp2
         {
             try
             {
-                string folderPath = @"D:\TAILIEU\CT182_UML"; //Thư mục ghi nhận
+                string folderPath = @"D:\TAILIEU\Test"; //Thư mục ghi nhận
                 if (!Directory.Exists(folderPath))
                 {
                     MessageBox.Show("Thư mục không tồn tại!", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -95,7 +95,7 @@ namespace WindowsFormsApp2
                     openFiles.Add(process.MainModule.FileName);
                 }
             }
-            catch { } 
+            catch { }
 
             return openFiles;
         }
@@ -168,7 +168,7 @@ namespace WindowsFormsApp2
                     }
                 }
 
-                string query = "INSERT INTO file_changes (file_path, action, timestamp, APP_NAME) VALUES (@file_path, @action, NOW(), @app_name)";
+                string query = "INSERT INTO file_changes (file_path, action, timestamp, process_name) VALUES (@file_path, @action, NOW(), @app_name)";
 
                 using (MySqlConnection conn = new MySqlConnection(connectionString))
                 {
@@ -197,7 +197,8 @@ namespace WindowsFormsApp2
         {
             try
             {
-                string query = "SELECT id, file_path, action, timestamp, APP_NAME FROM file_changes " +
+                MessageBox.Show("LoadData() được gọi", "Debug", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                string query = "SELECT id, file_path, action, timestamp, process_name FROM file_changes " +
                                "WHERE timestamp BETWEEN STR_TO_DATE(@start, '%Y-%m-%d %H:%i:%s') " +
                                "AND STR_TO_DATE(@end, '%Y-%m-%d %H:%i:%s') ORDER BY timestamp DESC";
 
@@ -233,6 +234,9 @@ namespace WindowsFormsApp2
         {
             try
             {
+                string startTime = dtpStart.Value.ToString("yyyy-MM-dd HH:mm:ss");
+                string endTime = dtpEnd.Value.ToString("yyyy-MM-dd HH:mm:ss");
+                MessageBox.Show($"Lọc dữ liệu từ: {startTime} đến {endTime}", "Debug", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 string query = "SELECT id, file_path, action, timestamp FROM file_changes " +
                                "WHERE timestamp BETWEEN STR_TO_DATE(@start, '%Y-%m-%d %H:%i:%s') " +
                                "AND STR_TO_DATE(@end, '%Y-%m-%d %H:%i:%s') " +
@@ -245,8 +249,8 @@ namespace WindowsFormsApp2
                     conn.Open();
                     using (MySqlCommand cmd = new MySqlCommand(query, conn))
                     {
-                        string startTime = dtpStart.Value.ToString("yyyy-MM-dd HH:mm:ss");
-                        string endTime = dtpEnd.Value.ToString("yyyy-MM-dd HH:mm:ss");
+                        //string startTime = dtpStart.Value.ToString("yyyy-MM-dd HH:mm:ss");
+                        //string endTime = dtpEnd.Value.ToString("yyyy-MM-dd HH:mm:ss");
                         MessageBox.Show($"Lọc từ: {startTime} đến {endTime}", "Debug", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
                         cmd.Parameters.AddWithValue("@start", startTime);
@@ -270,7 +274,7 @@ namespace WindowsFormsApp2
 
         private void btnLoadData_Click_1(object sender, EventArgs e)
         {
-
+            LoadData();
         }
     }
 }
