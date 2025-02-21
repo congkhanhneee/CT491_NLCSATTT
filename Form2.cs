@@ -7,7 +7,7 @@ namespace WindowsFormsApp2
 {
     public partial class Form2 : Form
     {
-        private string connectionString = "server=localhost;database=file_tracking;user=root;password=;";
+        private string connectionString = "server=localhost;database=file_manager;user=root;password=;";
         private DateTime startTime;
         private DateTime endTime;
 
@@ -35,13 +35,15 @@ namespace WindowsFormsApp2
                     string query = @"
                         SELECT 
                             COUNT(*) AS total_actions,
-                            SUM(CASE WHEN action = 'Tạo' THEN 1 ELSE 0 END) AS created_files,
-                            SUM(CASE WHEN action = 'Mở' THEN 1 ELSE 0 END) AS opened_files,
-                            SUM(CASE WHEN action = 'Sửa' THEN 1 ELSE 0 END) AS edited_files,
-                            SUM(CASE WHEN action = 'Xóa' THEN 1 ELSE 0 END) AS deleted_files,
-                            SUM(CASE WHEN action LIKE 'Đổi tên%' THEN 1 ELSE 0 END) AS renamed_files
-                        FROM file_changes
-                        WHERE timestamp BETWEEN @start AND @end";
+                                SUM(CASE WHEN A.NAME_ACTION = 'Tạo' THEN 1 ELSE 0 END) AS created_files,
+                                SUM(CASE WHEN A.NAME_ACTION = 'Mở' THEN 1 ELSE 0 END) AS opened_files,
+                                SUM(CASE WHEN A.NAME_ACTION = 'Sửa' THEN 1 ELSE 0 END) AS edited_files,
+                                SUM(CASE WHEN A.NAME_ACTION = 'Xóa' THEN 1 ELSE 0 END) AS deleted_files,
+                                SUM(CASE WHEN A.NAME_ACTION LIKE 'Đổi tên%' THEN 1 ELSE 0 END) AS renamed_files
+                        FROM DETAIL_FILE D
+                        JOIN ACTION A ON D.ID_ACTION = A.ID_ACTION
+                        WHERE D.DATE_ACTION BETWEEN @start AND @end;";
+;
 
                     using (MySqlCommand cmd = new MySqlCommand(query, conn))
                     {
@@ -78,8 +80,9 @@ namespace WindowsFormsApp2
                 {
                     conn.Open();
                     string query = @"
-                        SELECT DISTINCT file_path FROM file_changes
-                        WHERE timestamp BETWEEN @start AND @end";
+                        SELECT DISTINCT f.name_file FROM file f JOIN DETAIL_FILE df
+                        ON f.id_file=df.id_file
+                        WHERE df.date_action BETWEEN @start AND @end";
 
                     using (MySqlCommand cmd = new MySqlCommand(query, conn))
                     {
@@ -91,7 +94,7 @@ namespace WindowsFormsApp2
                             cboFiles.Items.Clear();
                             while (reader.Read())
                             {
-                                cboFiles.Items.Add(reader.GetString("file_path"));
+                                cboFiles.Items.Add(reader.GetString("name_file"));
                             }
                         }
                     }
@@ -125,43 +128,25 @@ namespace WindowsFormsApp2
                 {
                     conn.Open();
                     string query = @"
-                    WITH RECURSIVE file_history AS (
-                        SELECT 
-                            id, 
-                            file_path, 
-                            SUBSTRING_INDEX(file_path, '\\', -1) AS file_name,
-                            action,
-                            process_name,
-                            timestamp,
-                        CASE 
-                            WHEN action LIKE 'Đổi tên từ %' THEN SUBSTRING(action, 12) 
-                            ELSE NULL 
-                        END AS old_name
-                    FROM file_changes
-                    WHERE file_path LIKE CONCAT('%', @fileName)
-
-                    UNION ALL
-
                     SELECT 
-                        fc.id, 
-                        fc.file_path, 
-                        SUBSTRING_INDEX(fc.file_path, '\\', -1) AS file_name,
-                        fc.action,
-                        fc.process_name,
-                        fc.timestamp,
-                        CASE 
-                            WHEN fc.action LIKE 'Đổi tên từ %' THEN SUBSTRING(fc.action, 12) 
-                            ELSE NULL 
-                        END AS old_name
-                    FROM file_changes fc
-                    INNER JOIN file_history fh ON fh.old_name = SUBSTRING_INDEX(fc.file_path, '\\', -1)
-                )
-                SELECT * FROM file_history ORDER BY timestamp DESC;";
+                        df.DATE_ACTION,
+                        f.NAME_FILE AS CURRENT_NAME,
+                        df.OLD_NAME,
+                        df.OLD_PATH,
+                        df.NEW_PATH,
+                        a.NAME_ACTION,
+                        u.NAME_USER
+                    FROM DETAIL_FILE df
+                    JOIN FILE f ON df.ID_FILE = f.ID_FILE
+                    JOIN ACTION a ON df.ID_ACTION = a.ID_ACTION
+                    JOIN USER u ON df.ID_USER = u.ID_USER
+                    WHERE f.NAME_FILE = @file_name
+                    ORDER BY df.DATE_ACTION DESC;";
 
 
                     using (MySqlCommand cmd = new MySqlCommand(query, conn))
                     {
-                        cmd.Parameters.AddWithValue("@fileName", fileName);
+                        cmd.Parameters.AddWithValue("@file_name", fileName);
 
                         DataTable dt = new DataTable();
                         using (MySqlDataAdapter adapter = new MySqlDataAdapter(cmd))
