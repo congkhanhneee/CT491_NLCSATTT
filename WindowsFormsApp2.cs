@@ -8,15 +8,15 @@ using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using System.Data;
+using System.Runtime.InteropServices.ComTypes;
 
 namespace WindowsFormsApp2
 {
     public partial class Form1 : Form
     {
         private FileSystemWatcher watcher;
-        private string connectionString = "server=localhost;database=file_tracking;user=root;password=;";
+        private string connectionString = "server=localhost;database=file_manager;user=root;password=;";
 
-        // Import từ kernel32.dll và psapi.dll
         [DllImport("kernel32.dll")]
         public static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
 
@@ -48,6 +48,8 @@ namespace WindowsFormsApp2
                 dtpEnd.Value = DateTime.Now;
                 InitWatcher();
                 LoadData();
+                dataGridView1.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+
             }
             catch (Exception ex)
             {
@@ -70,9 +72,9 @@ namespace WindowsFormsApp2
                 EnableRaisingEvents = true
             };
 
-            watcher.Created += (s, e) => FileEventHandler(e.FullPath, "Tạo");
-            watcher.Changed += (s, e) => FileEventHandler(e.FullPath, "Sửa");
-            watcher.Deleted += (s, e) => FileEventHandler(e.FullPath, "Xóa");
+            watcher.Created += (s, e) => FileEventHandler(e.FullPath, "tạo");
+            watcher.Changed += (s, e) => FileEventHandler(e.FullPath, "sửa");
+            watcher.Deleted += (s, e) => FileEventHandler(e.FullPath, "xóa");
             watcher.Renamed += (s, e) => FileRenamedHandler(e.OldFullPath, e.FullPath);
 
             listBox1.Items.Add("Đang theo dõi: " + folderPath);
@@ -80,10 +82,24 @@ namespace WindowsFormsApp2
 
         private void FileRenamedHandler(string oldPath, string newPath)
         {
-            FileEventHandler(newPath, $"Đổi tên từ {Path.GetFileName(oldPath)}");
+            FileEventHandler(newPath, $"đổi tên");
         }
 
-        private void FileEventHandler(string filePath, string action)
+        private string GetOldName(string oldPath)
+        {
+            return Path.GetFileName(oldPath);
+        }
+
+        long GetFileSize(string filePath)
+        {
+            if (File.Exists(filePath))
+            {
+                FileInfo fileInfo = new FileInfo(filePath);
+                return fileInfo.Length; // Kích thước tính bằng byte
+            }
+            return 0; // Trả về 0 nếu file không tồn tại
+        }
+        private void FileEventHandler(string filePath, string action, string oldPath = null)
         {
             try
             {
@@ -91,22 +107,94 @@ namespace WindowsFormsApp2
                     return;
 
                 string processName = GetProcessUsingFile(filePath);
+                string oldName = GetOldName(oldPath);
+                string fileExtension = Path.GetExtension(filePath);
+                int idAction = -1;
 
-                string query = "INSERT INTO file_changes (file_path, action, timestamp, process_name) VALUES (@file_path, @action, NOW(), @app_name)";
+                string idIdentity = null;
 
                 using (MySqlConnection conn = new MySqlConnection(connectionString))
                 {
                     conn.Open();
-                    using (MySqlCommand cmd = new MySqlCommand(query, conn))
+
+                    // Truy vấn để lấy id_identity nếu phần mở rộng tồn tại trong bảng identity
+                    string identityQuery = "SELECT id_identity FROM identity WHERE id_identity = @extension";
+                    using (MySqlCommand cmd = new MySqlCommand(identityQuery, conn))
                     {
-                        cmd.Parameters.AddWithValue("@file_path", filePath);
-                        cmd.Parameters.AddWithValue("@action", action);
-                        cmd.Parameters.AddWithValue("@app_name", processName);
-                        cmd.ExecuteNonQuery();
+                        cmd.Parameters.AddWithValue("@extension", fileExtension);
+                        object result = cmd.ExecuteScalar();
+                        if (result != null)
+                        {
+                            idIdentity = result.ToString(); // Chuyển thành string
+                        }
+                    }
+
+                    // Kiểm tra giá trị trước khi chèn
+                    MessageBox.Show($"File Extension: {fileExtension}\nID Identity: {idIdentity}");
+
+                    if (idIdentity != null) 
+                    {
+                        string insertQuery = "INSERT INTO file (name_file, id_identity) VALUES (@name_file, @id_identity)";
+                        string fileName = Path.GetFileName(filePath);
+
+                        using (MySqlCommand cmd = new MySqlCommand(insertQuery, conn))
+                        {
+                            cmd.Parameters.AddWithValue("@name_file", fileName);
+                            cmd.Parameters.AddWithValue("@id_identity", idIdentity); // Dùng idIdentity từ DB
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        // Lấy ID của file vừa chèn
+                        string selectFileIdQuery = "SELECT LAST_INSERT_ID()";
+                        int fileId = Convert.ToInt32(new MySqlCommand(selectFileIdQuery, conn).ExecuteScalar());
+
+                        // Lấy id_action từ bảng action
+                        
+                        using (MySqlCommand cmd = new MySqlCommand("SELECT ID_ACTION FROM action WHERE name_action = @action", conn))
+                        {
+                            cmd.Parameters.AddWithValue("@action", action);
+                            object result = cmd.ExecuteScalar();
+                            if (result != null)
+                            {
+                                idAction = Convert.ToInt32(result);
+                            }
+                            else
+                            {
+                                Console.WriteLine("Không tìm thấy ID_ACTION cho action: " + action);
+                            }
+                        }
+
+                        if (idAction == -1)
+                        {
+                            MessageBox.Show($"Không tìm thấy ID_ACTION cho hành động: {action}", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            return;
+                        }
+
+                        // Chèn vào bảng DETAIL_FILE
+                        string insertDetailFileQuery = "INSERT INTO DETAIL_FILE (date_action, id_file, id_action, id_user, old_path, size, new_path, old_name, process_name) " +
+                                                       "VALUES (NOW(), @id_file, @id_action, 1, @old_path, @size, @new_path, @old_name, @process_name)";
+
+                        using (MySqlCommand cmd = new MySqlCommand(insertDetailFileQuery, conn))
+                        {
+                            cmd.Parameters.AddWithValue("@id_file", fileId);
+                            cmd.Parameters.AddWithValue("@id_action", idAction);
+                            cmd.Parameters.AddWithValue("@old_path", oldPath ?? (object)DBNull.Value);
+                            cmd.Parameters.AddWithValue("@size", GetFileSize(filePath));
+                            cmd.Parameters.AddWithValue("@new_path", filePath);
+                            cmd.Parameters.AddWithValue("@old_name", oldName ?? (object)DBNull.Value);
+                            cmd.Parameters.AddWithValue("@process_name", processName);
+                            cmd.ExecuteNonQuery();
+                        }
+
+                    }
+                    else
+                    {
+                        MessageBox.Show($"Phần mở rộng '{fileExtension}' không tồn tại trong bảng identity.", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                 }
 
-                Invoke(new Action(() => listBox1.Items.Insert(0, $"{DateTime.Now}: {action} - {filePath} - {processName}")));
+                // Cập nhật giao diện
+                Invoke(new Action(() => listBox1.Items.Insert(0, $"{DateTime.Now}: {action} - {filePath} - {processName} - ID: {idIdentity}")));
                 Invoke(new Action(LoadData));
             }
             catch (Exception ex)
@@ -114,6 +202,7 @@ namespace WindowsFormsApp2
                 MessageBox.Show("Lỗi khi ghi vào DB: " + ex.Message, "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
+
 
         private string GetProcessUsingFile(string filePath)
         {
@@ -166,9 +255,11 @@ namespace WindowsFormsApp2
             try
             {
                 MessageBox.Show("Có thay đổi xảy ra!", "Debug", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                string query = "SELECT id, file_path, action, timestamp, process_name FROM file_changes " +
-                               "WHERE timestamp BETWEEN STR_TO_DATE(@start, '%Y-%m-%d %H:%i:%s') " +
-                               "AND STR_TO_DATE(@end, '%Y-%m-%d %H:%i:%s') ORDER BY timestamp DESC";
+                string query = "SELECT df.id_file, f.name_file, df.date_action, df.new_path " +
+                                 "FROM DETAIL_FILE df " +
+                                 "JOIN file f ON df.id_file = f.id_file " +
+                                "WHERE df.date_action BETWEEN @start AND @end " +
+                                "ORDER BY df.date_action DESC";
 
                 DataTable dt = new DataTable();
 
@@ -194,10 +285,18 @@ namespace WindowsFormsApp2
                 MessageBox.Show("Lỗi khi tải dữ liệu: " + ex.Message, "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
-
         private void btnLoadData_Click_1(object sender, EventArgs e)
         {
             LoadData();
+        }
+
+        private void btnDetails_Click(object sender, EventArgs e)
+        {
+            DateTime start = dtpStart.Value;
+            DateTime end = dtpEnd.Value;
+
+            Form2 detailsForm = new Form2(start, end);
+            detailsForm.Show();
         }
     }
 }
